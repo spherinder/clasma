@@ -23,8 +23,8 @@ pub fn partial(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let Pat::Ident(pat_ident) = &*pat_type.pat else { break 'attr };
             let field = &pat_ident.ident;
             expan_args.push(match refty.mutability {
-                Some(_) => quote! { &mut $(st).#field },
-                None => quote! { &$(st).#field },
+                Some(_) => quote! { &mut ($st).#field },
+                None => quote! { &($st).#field },
             });
             continue 'l;
         }
@@ -39,13 +39,17 @@ pub fn partial(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
+
     let res = quote! {
         #func
 
         #[macro_export]
         macro_rules! #func_name {
-            ( <$($generic:tt),+>, $st:expr, #(#match_args),* ) => {
-                #func_name::<$($generic),*>( #(#expan_args),* );
+            ( <$($t:ty),+>, $st:expr, #(#match_args),* ) => {
+                #func_name::<$($t),*>( #(#expan_args),* );
+            };
+            ( <$($lt:lifetime),+ $(, $t:ty)*>, $st:expr, #(#match_args),* ) => {
+                #func_name::<$($lt),* $(, $t)*>( #(#expan_args),* );
             };
             ( $st:expr, #(#match_args),* ) => {
                 #func_name( #(#expan_args),* );
