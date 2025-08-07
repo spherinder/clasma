@@ -7,15 +7,25 @@ fn is_clasma_field_attr(attr: &Attribute) -> bool {
     first_seg.ident == "clasma"
 }
 
-fn compute_match_args(sig: &mut Signature) -> (Vec<TokenStream>, Vec<TokenStream>) {
+fn compute_match_args(sig: &mut Signature) -> Result<(Vec<TokenStream>, Vec<TokenStream>), syn::Error> {
     let mut match_args = Vec::new();
     let mut expan_args = Vec::new();
     for (i,arg) in sig.inputs.iter().enumerate() {
         if 'blk: {
             let FnArg::Typed(pat_type) = arg else { break 'blk true };
-            let Type::Reference(refty) = &*pat_type.ty else { break 'blk true };
             if !pat_type.attrs.iter().any(is_clasma_field_attr) { break 'blk true };
-            let Pat::Ident(pat_ident) = &*pat_type.pat else { break 'blk true };
+            let Type::Reference(refty) = &*pat_type.ty else {
+                return Err(syn::Error::new_spanned(
+                    pat_type,
+                    "#[clasma] arguments must be reference types",
+                ))
+            };
+            let Pat::Ident(pat_ident) = &*pat_type.pat else {
+                return Err(syn::Error::new_spanned(
+                    pat_type,
+                    "#[clasma] arguments must be normal identifiers",
+                ))
+            };
 
             let field = &pat_ident.ident;
             expan_args.push(match refty.mutability {
@@ -34,7 +44,7 @@ fn compute_match_args(sig: &mut Signature) -> (Vec<TokenStream>, Vec<TokenStream
         let FnArg::Typed(pat_type) = arg else { continue };
         pat_type.attrs.retain(|a| !is_clasma_field_attr(a));
     }
-    return (match_args, expan_args);
+    return Ok((match_args, expan_args));
 }
 
 #[proc_macro_attribute]
@@ -43,7 +53,10 @@ pub fn partial(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) ->
     match item {
         Item::Fn(mut item_fn) => {
             let func_name = &item_fn.sig.ident.to_token_stream();
-            let (match_args, expan_args) = compute_match_args(&mut item_fn.sig);
+            let (match_args, expan_args) = match compute_match_args(&mut item_fn.sig) {
+                Ok(x) => x,
+                Err(x) => return x.to_compile_error().into(),
+            };
             return quote! {
                 #item_fn
 
@@ -80,37 +93,61 @@ pub fn partial(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) ->
                 ).to_compile_error().into();
             };
 
-            let macs: Vec<_> = item_impl.items.iter_mut().filter_map(|item| {
+            let macs: Result<Vec<_>, syn::Error> = item_impl.items.iter_mut().filter_map(|item| {
                 if let ImplItem::Fn(f) = item {Some(f)} else {None}
             }).map(|f| {
-                let (match_args, expan_args) = compute_match_args(&mut f.sig);
+                let (match_args, expan_args) = compute_match_args(&mut f.sig)?;
                 let func_name = &f.sig.ident;
-                return quote! {
+                // It's really annoying that lifetimes and types can not be parsed unambiguously in one rule
+                return Ok(quote! {
                     #[macro_export]
                     macro_rules! #func_name {
-                        ( < $($ts:tt),+ >::< $($t:tt),+ >, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($ts),* >::#func_name::< $($t),* >( #(#expan_args),* );
+
+                        ( < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($lt2:lifetime),+ $(, $t2:ty)* >, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($lt1),* $(, $t1)* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args),* );
+                        };
+                        ( < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($t2:ty),+ >, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($lt1),* $(, $t1)* >::#func_name::< $($t2),* >( #(#expan_args),* );
+                        };
+                        ( < $($t1:ty),+ >::< $($lt2:lifetime),+ $(, $t2:ty)* >, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($t1),* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args),* );
+                        };
+                        ( < $($t1:ty),+ >::< $($t2:ty),+ >, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($t1),* >::#func_name::< $($t2),* >( #(#expan_args),* );
                         };
 
-                        ( < $($ts:tt),+ >::, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($ts),* >::#func_name( #(#expan_args),* );
+
+                        ( < $($lt:lifetime),+ $(, $t:ty)* >::, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($lt),* $(, $t)* >::#func_name( #(#expan_args),* );
+                        };
+                        ( < $($t:ty),+ >::, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($t),* >::#func_name( #(#expan_args),* );
                         };
 
-                        ( < $($ts:tt),+ >, $st:expr #(, #match_args)* ) => {
-                            #st_name::#func_name::< $($ts),* >( #(#expan_args),* );
+
+
+                        ( < $($lt:lifetime),+ $(, $t:ty)* >, $st:expr #(, #match_args)* ) => {
+                            #st_name::#func_name::< $($lt),* $(, $t)* >( #(#expan_args),* );
                         };
+                        ( < $($t:ty)+ >, $st:expr #(, #match_args)* ) => {
+                            #st_name::#func_name::< $($t),* >( #(#expan_args),* );
+                        };
+
 
                         ( $st:expr #(, #match_args)* ) => {
                             #st_name::#func_name( #(#expan_args),* );
                         };
                     }
-                };
+                });
             }).collect();
-            return quote! {
+
+            let macs = match macs {Ok(x) => x, Err(x) => return x.to_compile_error().into()};
+            let res = quote! {
                 #item_impl
 
                 #(#macs)*
-            }.into()
+            };
+            return res.into();
         },
         _ => {
             return syn::Error::new_spanned(
