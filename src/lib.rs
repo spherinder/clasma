@@ -45,11 +45,11 @@ pub fn partial(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[macro_export]
         macro_rules! #func_name {
-            ( <$($t:ty),+>, $st:expr, #(#match_args),* ) => {
-                #func_name::<$($t),*>( #(#expan_args),* );
-            };
             ( <$($lt:lifetime),+ $(, $t:ty)*>, $st:expr, #(#match_args),* ) => {
                 #func_name::<$($lt),* $(, $t)*>( #(#expan_args),* );
+            };
+            ( <$($t:ty),+>, $st:expr, #(#match_args),* ) => {
+                #func_name::<$($t),*>( #(#expan_args),* );
             };
             ( $st:expr, #(#match_args),* ) => {
                 #func_name( #(#expan_args),* );
