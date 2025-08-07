@@ -148,5 +148,3 @@ impl Tourist {
 ``` sh
 cargo add clasma
 ```
-
-

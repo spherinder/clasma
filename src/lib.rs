@@ -1,61 +1,128 @@
-use proc_macro::TokenStream;
-use quote::{format_ident, quote};
-use syn::{parse_macro_input, Attribute, FnArg, ItemFn, Pat, Type};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote, ToTokens};
+use syn::{parse_macro_input, Attribute, FnArg, ImplItem, Item, Pat, Signature, Type};
 
 fn is_clasma_field_attr(attr: &Attribute) -> bool {
     let Some(first_seg) = attr.path().segments.first() else { return false };
     first_seg.ident == "clasma"
 }
 
-#[proc_macro_attribute]
-pub fn partial(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mut func = parse_macro_input!(item as ItemFn);
-
-    let func_name = &func.sig.ident;
-
+fn compute_match_args(sig: &mut Signature) -> (Vec<TokenStream>, Vec<TokenStream>) {
     let mut match_args = Vec::new();
     let mut expan_args = Vec::new();
-    'l: for (i,arg) in func.sig.inputs.iter().enumerate() {
-        'attr: {
-            let FnArg::Typed(pat_type) = arg else { break 'attr };
-            let Type::Reference(refty) = &*pat_type.ty else { break 'attr };
-            if !pat_type.attrs.iter().any(is_clasma_field_attr) { break 'attr };
-            let Pat::Ident(pat_ident) = &*pat_type.pat else { break 'attr };
+    for (i,arg) in sig.inputs.iter().enumerate() {
+        if 'blk: {
+            let FnArg::Typed(pat_type) = arg else { break 'blk true };
+            let Type::Reference(refty) = &*pat_type.ty else { break 'blk true };
+            if !pat_type.attrs.iter().any(is_clasma_field_attr) { break 'blk true };
+            let Pat::Ident(pat_ident) = &*pat_type.pat else { break 'blk true };
+
             let field = &pat_ident.ident;
             expan_args.push(match refty.mutability {
                 Some(_) => quote! { &mut ($st).#field },
                 None => quote! { &($st).#field },
             });
-            continue 'l;
-        }
-        let matcharg = format_ident!("__arg{i}");
-        match_args.push(quote! { $#matcharg:expr });
-        expan_args.push(quote! { $#matcharg });
-    }
-
-    for arg in func.sig.inputs.iter_mut() {
-        if let FnArg::Typed(pat_type) = arg {
-            pat_type.attrs.retain(|a| !is_clasma_field_attr(a));
+            false
+        } {
+            let matcharg = format_ident!("__arg{i}");
+            match_args.push(quote! { $#matcharg:expr });
+            expan_args.push(quote! { $#matcharg });
         }
     }
 
+    for arg in sig.inputs.iter_mut() {
+        let FnArg::Typed(pat_type) = arg else { continue };
+        pat_type.attrs.retain(|a| !is_clasma_field_attr(a));
+    }
+    return (match_args, expan_args);
+}
 
-    let res = quote! {
-        #func
+#[proc_macro_attribute]
+pub fn partial(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let item = parse_macro_input!(item as Item);
+    match item {
+        Item::Fn(mut item_fn) => {
+            let func_name = &item_fn.sig.ident.to_token_stream();
+            let (match_args, expan_args) = compute_match_args(&mut item_fn.sig);
+            return quote! {
+                #item_fn
 
-        #[macro_export]
-        macro_rules! #func_name {
-            ( <$($lt:lifetime),+ $(, $t:ty)*>, $st:expr, #(#match_args),* ) => {
-                #func_name::<$($lt),* $(, $t)*>( #(#expan_args),* );
-            };
-            ( <$($t:ty),+>, $st:expr, #(#match_args),* ) => {
-                #func_name::<$($t),*>( #(#expan_args),* );
-            };
-            ( $st:expr, #(#match_args),* ) => {
-                #func_name( #(#expan_args),* );
-            };
-        }
-    };
+                #[macro_export]
+                macro_rules! #func_name {
+                    ( < $($lt:lifetime),+ $(, $t:ty)* >, $st:expr, #(#match_args),* ) => {
+                        #func_name::< $($lt),* $(, $t)* >( #(#expan_args),* );
+                    };
+                    ( < $($t:ty),+ >, $st:expr, #(#match_args),* ) => {
+                        #func_name::< $($t),* >( #(#expan_args),* );
+                    };
 
-    res.into()
+                    ( $st:expr, #(#match_args),* ) => {
+                        #func_name( #(#expan_args),* );
+                    };
+                }
+            }.into();
+        },
+        Item::Impl(mut item_impl) => {
+            if item_impl.trait_.is_some() {
+                return syn::Error::new_spanned(
+                    item_impl,
+                    "clasma::partial currently does not support `impl Trait` blocks.",
+                ).to_compile_error().into();
+            }
+            let Some(st_name) = ('blk: {
+                    let Type::Path(st_path) = &*item_impl.self_ty else { break 'blk None };
+                    let Some(st_name) = st_path.path.segments.last() else { break 'blk None };
+                    Some(&st_name.ident)
+            }) else {
+                return syn::Error::new_spanned(
+                    item_impl,
+                    "clasma::partial only supports `impl` blocks of `path::to::Type`",
+                ).to_compile_error().into();
+            };
+
+            let macs: Vec<_> = item_impl.items.iter_mut().filter_map(|item| {
+                if let ImplItem::Fn(f) = item {Some(f)} else {None}
+            }).map(|f| {
+                let (match_args, expan_args) = compute_match_args(&mut f.sig);
+                let func_name = &f.sig.ident;
+                return quote! {
+                    #[macro_export]
+                    macro_rules! #func_name {
+                        ( < $($ts:tt),+ >, < $($lt:lifetime),* $(, $t:ty)* >, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($ts),* >::#func_name::< $($lt),* $(, $t)* >( #(#expan_args),* );
+                        };
+                        ( < $($ts:tt),+ >, < $($t:ty),+ >, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($ts),* >::#func_name::< $($t),* >( #(#expan_args),* );
+                        };
+
+                        ( { $($ts:tt),+ }, $st:expr #(, #match_args)* ) => {
+                            #st_name::< $($ts),* >::#func_name( #(#expan_args),* );
+                        };
+
+                        ( < $($lt:lifetime),+ $(, $t:ty)* >, $st:expr #(, #match_args)* ) => {
+                            #st_name::#func_name::< $($lt),* $(, $t)* >( #(#expan_args),* );
+                        };
+                        ( < $($t:ty),+ >, $st:expr #(, #match_args)* ) => {
+                            #st_name::#func_name::< $($t),* >( #(#expan_args),* );
+                        };
+
+                        ( $st:expr #(, #match_args)* ) => {
+                            #st_name::#func_name( #(#expan_args),* );
+                        };
+                    }
+                };
+            }).collect();
+            return quote! {
+                #item_impl
+
+                #(#macs)*
+            }.into()
+        },
+        _ => {
+            return syn::Error::new_spanned(
+                item,
+                "clasma::partial must be applied to an `fn` or `impl` block.",
+            ).to_compile_error().into()
+        },
+    }
 }
