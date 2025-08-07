@@ -1,7 +1,7 @@
 # Clasma
 
-<!-- [![Crates.io](https://img.shields.io/crates/v/clasma.svg)](https://crates.io/crates/clasma) -->
-<!-- [![Docs.rs](https://docs.rs/clasma/badge.svg)](https://docs.rs/clasma) -->
+[![Crates.io](https://img.shields.io/crates/v/clasma.svg)](https://crates.io/crates/clasma)
+[![Docs.rs](https://docs.rs/clasma/badge.svg)](https://docs.rs/clasma)
 
 A procedural attribute macro to reduce boilerplate when passing partially borrow structs into functions.
 
@@ -41,19 +41,19 @@ foo!(x, 3);
 One can reorder struct fields, as long as field names match up with `#[clasma]` argument names. One can also optionally provide generic parameters inside angle brackets `<...>`.
 ```rust
 #[partial]
-fn bar<T>(some_arg: T, #[clasma] b: &B, #[clasma] a: &mut A) {
+fn foo<T>(some_arg: T, #[clasma] b: &B, #[clasma] a: &mut A) {
     // ...
 }
 
-bar!(<&str>, x, "hello");
+foo!(<&str>, x, "hello");
 // expands to:
-// bar::<&str>("hello", &x.b, &mut x.a);
+// foo::<&str>("hello", &x.b, &mut x.a);
 ```
 
 Lifetime parameters are also supported.
 ```rust
 #[partial]
-fn baz<'t: 'static>(#[clasma] b: &'t B, #[clasma] a: &'t A, other_arg: &'t u8) {
+fn foo<'t: 'static>(#[clasma] b: &'t B, #[clasma] a: &'t A, other_arg: &'t u8) {
     // ...
 }
 
@@ -62,10 +62,43 @@ const y: Mystruct = Mystruct {
     b: B::new(),
 };
 
-baz!(<'static>, y, &3);
+foo!(<'static>, y, &3);
 // expands to:
-// baz::<'static>(&y.b, &y.a, &3);
+// foo::<'static>(&y.b, &y.a, &3);
 ```
+
+Functions inside `impl` blocks need the `#[partial]` attribute above the `impl`. This will generate macros for all functions in the block, that have any `#[clasma]`-attributed argument.
+
+``` rust
+#[partial]
+impl Mystruct {
+    // ...
+    fn foo(#[clasma] a: &mut A, #[clasma] b: &B, some_arg: u8) {
+        // ...
+    }
+}
+
+foo!(x, 3);
+// expands to:
+// Mystruct::foo(&mut x.a, &x.b, 3, 3);
+```
+
+If *both* the type and the function in the `impl` block are generic, one can provide the arguments separated by `::` like so:
+``` rust
+#[partial]
+impl<T> Mystruct<T> {
+    // ...
+    fn foo<U>(#[clasma] a: &mut A, #[clasma] b: &B, some_arg: U, other_arg: T) {
+        // ...
+    }
+}
+
+foo!(<&str>::<u8>, x, 3, "hello");
+// expands to:
+// Mystruct::<&str>::foo::<u8>(&mut x.a, &x.b, 3, 3);
+```
+
+If *only* the type is generic, one passes the arguments like this: `foo!(<T>::, x, ...)`
 
 ## Motivating Example
 
@@ -105,7 +138,7 @@ The issue is that `visit` unnecessarily borrows `self.destinations` mutably when
 impl Tourist {
     fn visit(destinations: &Vec<String>, n_visits: &mut u32, dest: &String) {
         if destinations.contains(dest) {
-            n_visits += 1;
+            *n_visits += 1;
         }
     }
 
@@ -126,16 +159,16 @@ The `partial` macro handles borrowing and argument passing.
 
 ```rust
 #[partial]
-fn visit(#[clasma] destinations: &Vec<String>, #[clasma] n_visits: &mut u32, dest: &String) {
-    if destinations.contains(dest) {
-        *n_visits += 1;
-    }
-}
-
 impl Tourist {
+    fn visit(#[clasma] destinations: &Vec<String>, #[clasma] n_visits: &mut u32, dest: &String) {
+        if destinations.contains(dest) {
+            *n_visits += 1;
+        }
+    }
+
     fn visit_all(&mut self) {
         for dest in &self.destinations {
-            visit!(self, dest); // `visit!` automatically borrows the corresponding fields of `self`
+            visit!(self, dest); // Now the call to `visit` becomes much more concise
         }
         println!("Visited {} countries", self.destinations.len());
     }

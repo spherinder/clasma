@@ -88,22 +88,16 @@ pub fn partial(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) ->
                 return quote! {
                     #[macro_export]
                     macro_rules! #func_name {
-                        ( < $($ts:tt),+ >, < $($lt:lifetime),* $(, $t:ty)* >, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($ts),* >::#func_name::< $($lt),* $(, $t)* >( #(#expan_args),* );
-                        };
-                        ( < $($ts:tt),+ >, < $($t:ty),+ >, $st:expr #(, #match_args)* ) => {
+                        ( < $($ts:tt),+ >::< $($t:tt),+ >, $st:expr #(, #match_args)* ) => {
                             #st_name::< $($ts),* >::#func_name::< $($t),* >( #(#expan_args),* );
                         };
 
-                        ( { $($ts:tt),+ }, $st:expr #(, #match_args)* ) => {
+                        ( < $($ts:tt),+ >::, $st:expr #(, #match_args)* ) => {
                             #st_name::< $($ts),* >::#func_name( #(#expan_args),* );
                         };
 
-                        ( < $($lt:lifetime),+ $(, $t:ty)* >, $st:expr #(, #match_args)* ) => {
-                            #st_name::#func_name::< $($lt),* $(, $t)* >( #(#expan_args),* );
-                        };
-                        ( < $($t:ty),+ >, $st:expr #(, #match_args)* ) => {
-                            #st_name::#func_name::< $($t),* >( #(#expan_args),* );
+                        ( < $($ts:tt),+ >, $st:expr #(, #match_args)* ) => {
+                            #st_name::#func_name::< $($ts),* >( #(#expan_args),* );
                         };
 
                         ( $st:expr #(, #match_args)* ) => {
