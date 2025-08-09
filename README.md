@@ -1,4 +1,4 @@
-<img width="1280" height="396" alt="clasma" src="https://github.com/spherinder/clasma/blob/master/assets/clasma-logo.png?raw=true" />
+<img width="1280" alt="clasma" src="https://github.com/spherinder/clasma/blob/master/assets/clasma-logo.png?raw=true" />
 
 [![Crates.io](https://img.shields.io/crates/v/clasma.svg)](https://crates.io/crates/clasma)
 [![Docs.rs](https://docs.rs/clasma/badge.svg)](https://docs.rs/clasma)
