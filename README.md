@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/clasma.svg)](https://crates.io/crates/clasma)
 [![Docs.rs](https://docs.rs/clasma/badge.svg)](https://docs.rs/clasma)
 
-A procedural attribute macro to reduce boilerplate when passing partially borrow structs into functions.
+A procedural attribute macro to reduce boilerplate when writing functions that partially borrow a struct.
 
 ## Overview
 
