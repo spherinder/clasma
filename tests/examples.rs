@@ -1,4 +1,5 @@
-use clasma::clasma;
+// #![no_implicit_prelude]
+use ::clasma::{clasma, partial};
 
 struct A();
 impl A { const fn new() -> Self { Self() } }
@@ -7,14 +8,14 @@ impl B { const fn new() -> Self { Self() } }
 struct C();
 impl C { const fn new() -> Self { Self() } }
 
+#[clasma]
 struct Mystruct {
     a: A,
     b: B,
     c: C,
 }
 
-
-#[clasma(a,b,c)]
+#[partial(Mystruct)]
 fn foo1(a: &mut A, b: &B, some_arg: u8) {
     // ...
 }
@@ -33,7 +34,7 @@ fn ex1() {
 }
 
 
-#[clasma(a,b,c)]
+#[partial(Mystruct)]
 fn foo2<T>(b: &B, some_arg: T, a: &mut A, c: &C) {
     // ...
 }
@@ -51,7 +52,7 @@ fn ex2() {
     // foo::<&str>(&mystruct.b, "hello", &mut mystruct.a, &mystruct.c);
 }
 
-#[clasma(a,b,c)]
+#[partial(Mystruct)]
 fn foo3<'t: 'static>(b: &'t B, a: &'t A, other_arg: &'t u8) {
     // ...
 }
@@ -70,12 +71,14 @@ fn ex3() {
     // foo::<'static>(&mystruct.b, &mystruct.a, &3);
 }
 
-#[clasma(a,b,c)]
+#[partial(Mystruct)]
+// #[clasma(a,b,c)]
 fn foo4<T>(a: &A, other_arg: T, c: &mut C) {
     // ...
 }
 
-#[clasma(a,b,c)]
+#[partial(Mystruct)]
+// #[clasma(a,b,c)]
 fn bar4(c: &mut C, some_arg: u8, b: &B, a: &mut A) {
 
     foo4_scope!(<u8>, some_arg); // supplies the fields of `Mystruct` from local scope
@@ -83,7 +86,7 @@ fn bar4(c: &mut C, some_arg: u8, b: &B, a: &mut A) {
     // foo::<u8>(a, some_arg, c)
 }
 
-#[clasma(a,b,c)]
+#[partial(Mystruct)]
 impl Mystruct {
     // ...
     fn foo5(a: &mut A, b: &B, some_arg: u8) {
@@ -117,7 +120,7 @@ struct Mystruct6<T> {
     c: T,
 }
 
-#[clasma(a,b,c)]
+#[partial(Mystruct)]
 impl<T> Mystruct6<T> {
     // ...
     fn foo6<U>(a: &mut A, b: &B, some_arg: U, other_arg: T) {

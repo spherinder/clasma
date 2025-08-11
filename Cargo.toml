@@ -1,6 +1,6 @@
 [package]
 name = "clasma"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 authors = ["Oliver Bergqvist <spherinder@gmail.com>"]
 license = "GPL-3.0-or-later"
@@ -13,6 +13,7 @@ keywords = ["proc-macro", "partial-borrow", "clasma"]
 proc-macro = true
 
 [dependencies]
+macro_magic = { version = "0.6.0", features = ["proc_support"] }
 proc-macro2 = "1.0.95"
 quote = "1.0.40"
 syn = { version = "2.0.104", features = ["full", "visit-mut"] }

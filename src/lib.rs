@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
+use macro_magic::{import_tokens_attr, mm_core::export_tokens_internal};
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
-use syn::{parse_macro_input, punctuated::Punctuated, visit_mut::{self, VisitMut}, FnArg, Ident, ImplItem, Item, Macro, Pat, Signature, Type};
+use quote::{format_ident, quote, ToTokens};
+use syn::{parse_macro_input, spanned::Spanned, visit_mut::{self, VisitMut}, FnArg, Ident, ImplItem, Item, ItemStruct, Macro, Pat, PathArguments, Signature, Type};
 
-fn extract_args(fields: &BTreeSet<Ident>, sig: &Signature) -> impl Iterator<Item = Result<(Option<bool>, Ident), syn::Error>> {
+fn extract_args(fields: &BTreeSet<&Ident>, sig: &Signature) -> impl Iterator<Item = Result<(Option<bool>, Ident), syn::Error>> {
     sig.inputs.iter().map(|arg| {
         let pat_type = match arg {
             FnArg::Typed(x) => x,
@@ -28,7 +29,7 @@ fn extract_args(fields: &BTreeSet<Ident>, sig: &Signature) -> impl Iterator<Item
     })
 }
 
-fn handle_fn<'a>(fields: &BTreeSet<Ident>, sig: &'a Signature)
+fn handle_fn<'a>(fields: &BTreeSet<&Ident>, sig: &'a Signature)
     -> Result<(&'a Ident,Vec<TokenStream>,Vec<TokenStream>,Ident,Vec<TokenStream>,Vec<TokenStream>), syn::Error>
 {
     let args = extract_args(fields, sig).collect::<Result<Vec<_>,_>>()?;
@@ -36,13 +37,13 @@ fn handle_fn<'a>(fields: &BTreeSet<Ident>, sig: &'a Signature)
     let match_args: Vec<_> = args.iter()
         .filter(|(mu,_)| mu.is_none())
         .map(|(_,arg)| {
-            let id = format_ident!("__{arg}");
+            let id = format_ident!("_{arg}");
             quote! { $#id: expr }
         }).collect();
 
     let expan_args: Vec<_> = args.iter().map(|(mu,id)| {
         let &Some(mu) = mu else {
-            let matchid = format_ident!("__{id}");
+            let matchid = format_ident!("_{id}");
             return quote! { $#matchid }
         };
         return if mu {
@@ -56,20 +57,20 @@ fn handle_fn<'a>(fields: &BTreeSet<Ident>, sig: &'a Signature)
     let mac_scope_name = format_ident!("{func_name}_scope");
 
     let match_fields: Vec<_> = fields.iter().map(|field| {
-        let id = format_ident!("__{field}");
+        let id = format_ident!("_{field}");
         quote! { $#id: ident }
     }).collect();
     let expan_args_scope: Vec<_> = args.iter().map(|(_,id)| {
-        let id = format_ident!("__{id}");
+        let id = format_ident!("_{id}");
         quote! { $#id }
     }).collect();
 
     return Ok((func_name, match_args, expan_args, mac_scope_name, match_fields, expan_args_scope));
 }
 
-struct ScopeMacroVisitor<'a>(&'a BTreeSet<Ident>);
+struct ScopeMacroVisitor<'a,'b>(&'a BTreeSet<&'b Ident>);
 
-impl<'a> visit_mut::VisitMut for ScopeMacroVisitor<'a> {
+impl<'a,'b> VisitMut for ScopeMacroVisitor<'a,'b> {
     fn visit_macro_mut(&mut self, mac: &mut Macro) {
         'blk: {
             let Some(last_segment) = mac.path.segments.last() else { break 'blk };
@@ -84,9 +85,39 @@ impl<'a> visit_mut::VisitMut for ScopeMacroVisitor<'a> {
 
 #[proc_macro_attribute]
 pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let fields: BTreeSet<_> = parse_macro_input!(attr with Punctuated::<Ident, syn::Token![,]>::parse_terminated).into_iter().collect();
-    let mut item = parse_macro_input!(item as Item);
-    ScopeMacroVisitor(&fields).visit_item_mut(&mut item);
+    let item = parse_macro_input!(item as Item);
+    let Item::Struct(_) = &item else {
+        return syn::Error::new_spanned(
+            item,
+            "#[clasma] must attribute a struct",
+        ).to_compile_error().into();
+    };
+    // match export_tokens_internal(attr, item.to_token_stream(), true, true) {
+    match export_tokens_internal(attr, item.to_token_stream(), true, true) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+#[import_tokens_attr]
+#[proc_macro_attribute]
+pub fn partial(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut st_item = parse_macro_input!(attr as ItemStruct);
+
+    let (item, fields) = {
+        let mut item = parse_macro_input!(item as Item);
+        let Some(fields): Option<BTreeSet<_>> = st_item.fields.iter_mut().map(
+            // HACK: changing span allows `ScopeMacroVisitor` to pass fields to `foo_scope!`
+            |x| x.ident.as_mut().map(|x| { x.set_span(item.span()); &*x})
+        ).collect() else {
+            return syn::Error::new_spanned(
+                st_item,
+                "clasma can only partially borrow named structs",
+            ).to_compile_error().into();
+        };
+        ScopeMacroVisitor(&fields).visit_item_mut(&mut item);
+        (item,fields)
+    };
 
     match item {
         Item::Fn(item_fn) => {
@@ -102,28 +133,28 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
                 #[macro_export]
                 macro_rules! #func_name {
                     ( < $($lt:lifetime),+ $(, $t:ty)* >, $st:expr #(, #match_args)* ) => {
-                        #func_name::< $($lt),* $(, $t)* >( #(#expan_args),* );
+                        self::#func_name::< $($lt),* $(, $t)* >( #(#expan_args),* )
                     };
                     ( < $($t:ty),+ >, $st:expr #(, #match_args)* ) => {
-                        #func_name::< $($t),* >( #(#expan_args),* );
+                        self::#func_name::< $($t),* >( #(#expan_args),* )
                     };
 
                     ( $st:expr #(, #match_args)* ) => {
-                        #func_name( #(#expan_args),* );
+                        self::#func_name( #(#expan_args),* )
                     };
                 }
 
                 #[macro_export]
                 macro_rules! #mac_scope_name {
                     ( [ #(#match_fields)* ] < $($lt:lifetime),+ $(, $t:ty)* > #(, #match_args)* ) => {
-                        #func_name::< $($lt),* $(, $t)* >( #(#expan_args_scope),* );
+                        self::#func_name::< $($lt),* $(, $t)* >( #(#expan_args_scope),* )
                     };
                     ( [ #(#match_fields)* ] < $($t:ty),+ > #(, #match_args)* ) => {
-                        #func_name::< $($t),* >( #(#expan_args_scope),* );
+                        self::#func_name::< $($t),* >( #(#expan_args_scope),* )
                     };
 
                     ( [ #(#match_fields)* ] #(#match_args),* ) => {
-                        #func_name( #(#expan_args_scope),* );
+                        self::#func_name( #(#expan_args_scope),* )
                     };
                 }
             };
@@ -133,21 +164,21 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
             if item_impl.trait_.is_some() {
                 return syn::Error::new_spanned(
                     item_impl,
-                    "clasma::partial currently does not support `impl Trait` blocks.",
+                    "clasma currently does not support `impl Trait` blocks.",
                 ).to_compile_error().into();
             }
-            let Some(st_name) = ('blk: {
-                    let Type::Path(st_path) = &*item_impl.self_ty else { break 'blk None };
-                    let Some(st_name) = st_path.path.segments.last() else { break 'blk None };
-                    Some(&st_name.ident)
+            let Some(st_path) = ('blk: {
+                let Type::Path(st_path) = &*item_impl.self_ty else { break 'blk None };
+                let mut st_path = st_path.clone();
+                let Some(st_name) = st_path.path.segments.last_mut() else { break 'blk None };
+                st_name.arguments = PathArguments::None;
+                Some(st_path)
             }) else {
                 return syn::Error::new_spanned(
                     item_impl,
-                    "clasma::partial only supports `impl` blocks of `path::to::Type`",
+                    "clasma only supports `impl` blocks of `path::to::Type`",
                 ).to_compile_error().into();
             };
-
-
 
             let macs: Result<Vec<_>, syn::Error> = item_impl.items.iter().filter_map(|item| {
                 let ImplItem::Fn(f) = item else { return None };
@@ -168,68 +199,68 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
                     #[macro_export]
                     macro_rules! #func_name {
                         ( < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($lt2:lifetime),+ $(, $t2:ty)* >, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($lt1),* $(, $t1)* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args),* );
+                            self::#st_path::< $($lt1),* $(, $t1)* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args),* )
                         };
                         ( < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($t2:ty),+ >, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($lt1),* $(, $t1)* >::#func_name::< $($t2),* >( #(#expan_args),* );
+                            self::#st_path::< $($lt1),* $(, $t1)* >::#func_name::< $($t2),* >( #(#expan_args),* )
                         };
                         ( < $($t1:ty),+ >::< $($lt2:lifetime),+ $(, $t2:ty)* >, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($t1),* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args),* );
+                            self::#st_path::< $($t1),* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args),* )
                         };
                         ( < $($t1:ty),+ >::< $($t2:ty),+ >, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($t1),* >::#func_name::< $($t2),* >( #(#expan_args),* );
+                            self::#st_path::< $($t1),* >::#func_name::< $($t2),* >( #(#expan_args),* )
                         };
 
                         ( < $($lt:lifetime),+ $(, $t:ty)* >::, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($lt),* $(, $t)* >::#func_name( #(#expan_args),* );
+                            self::#st_path::< $($lt),* $(, $t)* >::#func_name( #(#expan_args),* )
                         };
                         ( < $($t:ty),+ >::, $st:expr #(, #match_args)* ) => {
-                            #st_name::< $($t),* >::#func_name( #(#expan_args),* );
+                            self::#st_path::< $($t),* >::#func_name( #(#expan_args),* )
                         };
 
                         ( < $($lt:lifetime),+ $(, $t:ty)* >, $st:expr #(, #match_args)* ) => {
-                            #st_name::#func_name::< $($lt),* $(, $t)* >( #(#expan_args),* );
+                            self::#st_path::#func_name::< $($lt),* $(, $t)* >( #(#expan_args),* )
                         };
                         ( < $($t:ty)+ >, $st:expr #(, #match_args)* ) => {
-                            #st_name::#func_name::< $($t),* >( #(#expan_args),* );
+                            self::#st_path::#func_name::< $($t),* >( #(#expan_args),* )
                         };
 
                         ( $st:expr #(, #match_args)* ) => {
-                            #st_name::#func_name( #(#expan_args),* );
+                            self::#st_path::#func_name( #(#expan_args),* )
                         };
                     }
 
                     #[macro_export]
                     macro_rules! #mac_scope_name {
                         ( [ #(#match_fields)* ] < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($lt2:lifetime),+ $(, $t2:ty)* > #(, #match_args)* ) => {
-                            #st_name::< $($lt1),* $(, $t1)* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args_scope),* );
+                            self::#st_path::< $($lt1),* $(, $t1)* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args_scope),* )
                         };
                         ( [ #(#match_fields)* ] < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($t2:ty),+ > #(, #match_args)* ) => {
-                            #st_name::< $($lt1),* $(, $t1)* >::#func_name::< $($t2),* >( #(#expan_args_scope),* );
+                            self::#st_path::< $($lt1),* $(, $t1)* >::#func_name::< $($t2),* >( #(#expan_args_scope),* )
                         };
                         ( [ #(#match_fields)* ] < $($t1:ty),+ >::< $($lt2:lifetime),+ $(, $t2:ty)* > #(, #match_args)* ) => {
-                            #st_name::< $($t1),* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args_scope),* );
+                            self::#st_path::< $($t1),* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args_scope),* )
                         };
                         ( [ #(#match_fields)* ] < $($t1:ty),+ >::< $($t2:ty),+ > #(, #match_args)* ) => {
-                            #st_name::< $($t1),* >::#func_name::< $($t2),* >( #(#expan_args_scope),* );
+                            self::#st_path::< $($t1),* >::#func_name::< $($t2),* >( #(#expan_args_scope),* )
                         };
 
                         ( [ #(#match_fields)* ] < $($lt:lifetime),+ $(, $t:ty)* >:: #(, #match_args)* ) => {
-                            #st_name::< $($lt),* $(, $t)* >::#func_name( #(#expan_args_scope),* );
+                            self::#st_path::< $($lt),* $(, $t)* >::#func_name( #(#expan_args_scope),* )
                         };
                         ( [ #(#match_fields)* ] < $($t:ty),+ >:: #(, #match_args)* ) => {
-                            #st_name::< $($t),* >::#func_name( #(#expan_args_scope),* );
+                            self::#st_path::< $($t),* >::#func_name( #(#expan_args_scope),* )
                         };
 
                         ( [ #(#match_fields)* ] < $($lt:lifetime),+ $(, $t:ty)* > #(, #match_args)* ) => {
-                            #st_name::#func_name::< $($lt),* $(, $t)* >( #(#expan_args_scope),* );
+                            self::#st_path::#func_name::< $($lt),* $(, $t)* >( #(#expan_args_scope),* )
                         };
                         ( [ #(#match_fields)* ] < $($t:ty)+ > #(, #match_args)* ) => {
-                            #st_name::#func_name::< $($t),* >( #(#expan_args_scope),* );
+                            self::#st_path::#func_name::< $($t),* >( #(#expan_args_scope),* )
                         };
 
                         ( [ #(#match_fields)* ] #(#match_args),* ) => {
-                            #st_name::#func_name( #(#expan_args_scope),* );
+                            self::#st_path::#func_name( #(#expan_args_scope),* )
                         };
                     }
                 });
@@ -246,7 +277,7 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
         _ => {
             return syn::Error::new_spanned(
                 item,
-                "clasma::partial must be applied to an `fn` or `impl` block.",
+                "clasma must be applied to an outer `fn` definition, an `impl` block, or a `struct` definition.",
             ).to_compile_error().into()
         },
     }
