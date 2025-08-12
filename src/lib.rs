@@ -4,12 +4,9 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use syn::{parse_macro_input, spanned::Spanned, visit_mut::{self, VisitMut}, FnArg, Ident, ImplItem, Item, ItemStruct, Macro, Pat, PathArguments, Signature, Type};
 
-fn extract_args(fields: &BTreeSet<&Ident>, sig: &Signature) -> impl Iterator<Item = Result<(Option<bool>, Ident), syn::Error>> {
-    sig.inputs.iter().map(|arg| {
-        let pat_type = match arg {
-            FnArg::Typed(x) => x,
-            FnArg::Receiver(r) => return Ok((None, Ident::new("self", r.self_token.span))),
-        };
+fn extract_args<'a,'b:'a>(fields: &BTreeSet<&Ident>, sig: &'a Signature, selfident: &'b Ident) -> impl Iterator<Item = Result<(Option<bool>, &'a Ident), syn::Error>> {
+    sig.inputs.iter().map(move |arg| {
+        let FnArg::Typed(pat_type) = arg else { return Ok((None, selfident)) };
         let Pat::Ident(pat_ident) = &*pat_type.pat else {
             return Err(syn::Error::new_spanned(
                 pat_type.clone(),
@@ -17,7 +14,7 @@ fn extract_args(fields: &BTreeSet<&Ident>, sig: &Signature) -> impl Iterator<Ite
             ))
         };
         if !fields.contains(&pat_ident.ident) {
-            return Ok((None, pat_ident.ident.clone()))
+            return Ok((None, &pat_ident.ident))
         };
         let Type::Reference(refty) = &*pat_type.ty else {
             return Err(syn::Error::new_spanned(
@@ -25,24 +22,22 @@ fn extract_args(fields: &BTreeSet<&Ident>, sig: &Signature) -> impl Iterator<Ite
                 "#[clasma] arguments must be reference types",
             ))
         };
-        return Ok((Some(refty.mutability.is_some()), pat_ident.ident.clone()))
+        return Ok((Some(refty.mutability.is_some()), &pat_ident.ident))
     })
 }
 
-fn handle_fn<'a>(fields: &BTreeSet<&Ident>, sig: &'a Signature)
-    -> Result<(&'a Ident,Vec<TokenStream>,Vec<TokenStream>,Ident,Vec<TokenStream>,Vec<TokenStream>), syn::Error>
+fn mk_fn_quotes<'a>(fields: &BTreeSet<&Ident>, args: &Vec<(Option<bool>, &'a Ident)>)
+    -> (Vec<TokenStream>,Vec<TokenStream>,Vec<TokenStream>,Vec<TokenStream>,Vec<&'a Ident>)
 {
-    let args = extract_args(fields, sig).collect::<Result<Vec<_>,_>>()?;
-    let func_name = &sig.ident;
-    let match_args: Vec<_> = args.iter()
+    let (mac_arg_names, match_args): (Vec<_>,Vec<_>) = args.iter()
         .filter(|(mu,_)| mu.is_none())
-        .map(|(_,arg)| {
+        .map(|&(_,arg)| {
             let id = format_ident!("_{arg}");
-            quote! { $#id: expr }
-        }).collect();
+            (arg, quote! { $#id: expr })
+        }).unzip();
 
-    let expan_args: Vec<_> = args.iter().map(|(mu,id)| {
-        let &Some(mu) = mu else {
+    let expan_args: Vec<_> = args.iter().map(|&(mu,id)| {
+        let Some(mu) = mu else {
             let matchid = format_ident!("_{id}");
             return quote! { $#matchid }
         };
@@ -54,8 +49,6 @@ fn handle_fn<'a>(fields: &BTreeSet<&Ident>, sig: &'a Signature)
     }).collect();
 
 
-    let mac_scope_name = format_ident!("{func_name}_scope");
-
     let match_fields: Vec<_> = fields.iter().map(|field| {
         let id = format_ident!("_{field}");
         quote! { $#id: ident }
@@ -65,7 +58,7 @@ fn handle_fn<'a>(fields: &BTreeSet<&Ident>, sig: &'a Signature)
         quote! { $#id }
     }).collect();
 
-    return Ok((func_name, match_args, expan_args, mac_scope_name, match_fields, expan_args_scope));
+    return (match_args, expan_args, match_fields, expan_args_scope, mac_arg_names);
 }
 
 struct ScopeMacroVisitor<'a,'b>(&'a BTreeSet<&'b Ident>);
@@ -92,7 +85,6 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
             "#[clasma] must attribute a struct",
         ).to_compile_error().into();
     };
-    // match export_tokens_internal(attr, item.to_token_stream(), true, true) {
     match export_tokens_internal(attr, item.to_token_stream(), true, true) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
@@ -103,6 +95,7 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
 #[proc_macro_attribute]
 pub fn partial(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut st_item = parse_macro_input!(attr as ItemStruct);
+    let selfident = &format_ident!("self");
 
     let (item, fields) = {
         let mut item = parse_macro_input!(item as Item);
@@ -121,11 +114,12 @@ pub fn partial(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> 
 
     match item {
         Item::Fn(item_fn) => {
-            let (func_name, match_args, expan_args, mac_scope_name, match_fields, expan_args_scope)
-                    = match handle_fn(&fields, &item_fn.sig) {
-                Ok(x) => x,
-                Err(x) => return x.to_compile_error().into(),
+            let args = match extract_args(&fields, &item_fn.sig, selfident).collect::<Result<Vec<_>,_>>() {
+                Ok(x) => x, Err(x) => return x.to_compile_error().into(),
             };
+            let (match_args, expan_args, match_fields, expan_args_scope, arg_names) = mk_fn_quotes(&fields, &args);
+            let func_name = &item_fn.sig.ident;
+            let scope_name = format_ident!("{func_name}_scope");
 
             let res = quote! {
                 #item_fn
@@ -142,10 +136,17 @@ pub fn partial(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> 
                     ( $st:expr #(, #match_args)* ) => {
                         self::#func_name( #(#expan_args),* )
                     };
+
+                    ($($other:tt)*) => {
+                        compile_error!(concat!(
+                            "Invalid syntax for `",stringify!(#func_name),"!`. ",
+                            "Usage: `",stringify!(#func_name),"!(<optional_generics>, struct_instance", stringify!(#(, #arg_names )*), ")`"
+                        ));
+                    };
                 }
 
                 #[macro_export]
-                macro_rules! #mac_scope_name {
+                macro_rules! #scope_name {
                     ( [ #(#match_fields)* ] < $($lt:lifetime),+ $(, $t:ty)* > #(, #match_args)* ) => {
                         self::#func_name::< $($lt),* $(, $t)* >( #(#expan_args_scope),* )
                     };
@@ -155,6 +156,19 @@ pub fn partial(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> 
 
                     ( [ #(#match_fields)* ] #(#match_args),* ) => {
                         self::#func_name( #(#expan_args_scope),* )
+                    };
+                    ($($other:tt)*) => {
+                        compile_error!(concat!(
+                            "Invalid syntax for `",stringify!(#scope_name),"!`. ",
+                            "Usage: `",stringify!(#scope_name),"!(<optional_generics>", stringify!(#( #arg_names),*), ")`"
+                        ));
+                    };
+                    ( $($other:tt)* ) => {
+                        compile_error!(concat!(
+                            "The `",
+                            stringify!(#scope_name),
+                            "` macro must be called from within a function or `impl` block annotated with `#[clasma::partial]`."
+                        ))
                     };
                 }
             };
@@ -190,9 +204,15 @@ pub fn partial(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> 
                 }) {
                     return None
                 }
-                // TODO produce a warning, if it "seems" like user is attempting to incorrectly use macro, instead of ignoring the `Err`
-                return handle_fn(&fields, &f.sig).ok();
-            }).map(|(func_name, match_args, expan_args, mac_scope_name, match_fields, expan_args_scope)| {
+
+                let Ok(args) = extract_args(&fields, &f.sig, selfident).collect::<Result<Vec<_>,_>>() else {
+                    // TODO produce a warning, if it "seems" like user is attempting to incorrectly use macro, instead of ignoring the `Err`
+                    return None
+                };
+                return Some((&f.sig.ident, mk_fn_quotes(&fields, &args)));
+            }).map(|(func_name, (match_args, expan_args, match_fields, expan_args_scope, arg_names))| {
+                let scope_name = format_ident!("{func_name}_scope");
+
                 // It's really annoying that lifetimes and types can not be parsed unambiguously in one rule.
                 // TODO use a tt-muncher to make less verbose
                 return Ok(quote! {
@@ -228,10 +248,17 @@ pub fn partial(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> 
                         ( $st:expr #(, #match_args)* ) => {
                             self::#st_path::#func_name( #(#expan_args),* )
                         };
+
+                        ($($other:tt)*) => {
+                            compile_error!(concat!(
+                                "Invalid syntax for `",stringify!(#func_name),"!`. ",
+                                "Usage: `",stringify!(#func_name),"!(<optional_impl_generics>::<optional_fn_generics>, struct_instance", stringify!(#(, #arg_names )*), ")`"
+                            ));
+                        };
                     }
 
                     #[macro_export]
-                    macro_rules! #mac_scope_name {
+                    macro_rules! #scope_name {
                         ( [ #(#match_fields)* ] < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($lt2:lifetime),+ $(, $t2:ty)* > #(, #match_args)* ) => {
                             self::#st_path::< $($lt1),* $(, $t1)* >::#func_name::< $($lt2),* $(, $t2)* >( #(#expan_args_scope),* )
                         };
@@ -261,6 +288,21 @@ pub fn partial(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> 
 
                         ( [ #(#match_fields)* ] #(#match_args),* ) => {
                             self::#st_path::#func_name( #(#expan_args_scope),* )
+                        };
+
+                        ( [ #(#match_fields)* ] $($other:tt)* ) => {
+                            compile_error!(concat!(
+                                "Invalid syntax for `",stringify!(#scope_name),"!`. ",
+                                "Usage: `",stringify!(#scope_name),"!(<optional_impl_generics>::<optional_fn_generics>", stringify!(#( #arg_names),*), ")`"
+                            ));
+                        };
+
+                        ($($other:tt)*) => {
+                            compile_error!(concat!(
+                                "The `",
+                                stringify!(#scope_name),
+                                "` macro must be called from within a function or `impl` block annotated with `#[clasma::partial]`."
+                            ))
                         };
                     }
                 });
