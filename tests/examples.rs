@@ -1,5 +1,5 @@
-// #![no_implicit_prelude]
-use ::clasma::{clasma, partial};
+#![allow(unused)]
+use clasma::clasma;
 
 struct A();
 impl A { const fn new() -> Self { Self() } }
@@ -14,9 +14,15 @@ struct Mystruct {
     b: B,
     c: C,
 }
+#[clasma]
+struct Other {
+    a: A,
+    b: B,
+    c: C,
+}
 
-#[partial(Mystruct)]
-fn foo1(a: &mut A, b: &B, some_arg: u8) {
+#[clasma(&<mut a, b> Mystruct)]
+fn foo1(some_arg: u8) {
     // ...
 }
 
@@ -34,8 +40,8 @@ fn ex1() {
 }
 
 
-#[partial(Mystruct)]
-fn foo2<T>(b: &B, some_arg: T, a: &mut A, c: &C) {
+#[clasma(&<*, mut a> Mystruct)]
+fn foo2<T>(some_arg: T) {
     // ...
 }
 
@@ -52,8 +58,8 @@ fn ex2() {
     // foo::<&str>(&mystruct.b, "hello", &mut mystruct.a, &mystruct.c);
 }
 
-#[partial(Mystruct)]
-fn foo3<'t: 'static>(b: &'t B, a: &'t A, other_arg: &'t u8) {
+#[clasma(&<'t *, !c> Mystruct)]
+fn foo3<'t: 'static>(other_arg: &'t u8) {
     // ...
 }
 
@@ -66,36 +72,35 @@ fn ex3() {
         c: C::new(),
     };
 
-    foo3!(<'static>, mystruct, &3);
+    foo3!(< 'static >, mystruct, &3);
     // expands to:
     // foo::<'static>(&mystruct.b, &mystruct.a, &3);
 }
 
-#[partial(Mystruct)]
-// #[clasma(a,b,c)]
-fn foo4<T>(a: &A, other_arg: T, c: &mut C) {
+#[clasma(&<a, mut c> Mystruct)]
+fn foo4<T>(other_arg: T) {
     // ...
 }
 
-#[partial(Mystruct)]
-// #[clasma(a,b,c)]
-fn bar4(c: &mut C, some_arg: u8, b: &B, a: &mut A) {
+#[clasma(&<mut a, b, mut c> Mystruct)]
+fn bar4(some_arg: u8) {
 
-    foo4_scope!(<u8>, some_arg); // supplies the fields of `Mystruct` from local scope
+    foo4!(<u8>, .., some_arg); // supplies the fields of `Mystruct` from local scope
     // expands to:
     // foo::<u8>(a, some_arg, c)
 }
 
-#[partial(Mystruct)]
+#[clasma]
 impl Mystruct {
     // ...
-    fn foo5(a: &mut A, b: &B, some_arg: u8) {
+    #[clasma(&<mut a, b> Mystruct)]
+    fn foo5(some_arg: u8) {
         // ...
     }
 
     fn bar5(c: &mut C, some_arg: u8, b: &B, a: &mut A) {
 
-        foo5_scope!(some_arg);
+        foo5!(.., some_arg);
         // expands to:
         // Mystruct::foo::<u8>(a, b, some_arg)
     }
@@ -114,16 +119,18 @@ fn ex5() {
     // Mystruct::foo(&mut mystruct.a, &mystruct.b, 3);
 }
 
+#[clasma]
 struct Mystruct6<T> {
     a: A,
     b: B,
     c: T,
 }
 
-#[partial(Mystruct)]
+#[clasma]
 impl<T> Mystruct6<T> {
     // ...
-    fn foo6<U>(a: &mut A, b: &B, some_arg: U, other_arg: T) {
+    #[clasma(&<mut a, b> Mystruct6<T>)]
+    fn foo6<U>(some_arg: U, other_arg: T) {
         // ...
     }
 }

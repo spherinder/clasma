@@ -6,127 +6,9 @@
 A procedural attribute macro to reduce boilerplate when writing functions that partially borrow a struct.
 
 ## Overview
-Annotating a struct `Mystruct` with `#[clasma]`, allows the attribute proc-macro `#[partial(Mystruct)]` on a function `foo`, to generate a macro `foo!`, that is callable similarly to `foo`, except that one can pass an instance of `Mystruct` to provide the arguments in `foo` that correspond to `Mystruct`'s fields.
+Annotating a struct `Mystruct` with `#[clasma]`, allows the attribute proc-macro `#[clasma(&<..> Mystruct)]` on a function `foo`, to generate a macro `foo!`, that is callable similarly to `foo`, except that one can pass an instance of `Mystruct` to provide the arguments in `foo` that correspond to `Mystruct`'s fields.
 
 This crate attempts to make partial or "split" borrows more ergonomic in Rust, where functions sometimes must borrow individual fields, rather than a single mutable reference to a struct, in order to adhere to borrowing rules, leading to verbose call sites.
-
-## Usage
-
-Consider the following struct:
-```rust
-#[clasma]
-struct Mystruct {
-    a: A,
-    b: B,
-    c: C,
-}
-
-let mut mystruct = Mystruct {
-    a: A::new(),
-    b: B::new(),
-    c: C::new(),
-};
-```
-
-The `clasma::partial` attribute proc-macro generates a macro `foo!`. The first argument to the `foo!` is `mystruct`. `foo!` borrows each of `mystruct`'s fields individually, matching `foo`'s argument names. One passes the remaining arguments in the same order as the signature.
-
-```rust
-#[partial(Mystruct)]
-fn foo(a: &mut A, b: &B, some_arg: u8) {
-    // ...
-}
-
-foo!(mystruct, 3);
-// expands to:
-// foo(&mut mystruct.a, &mystruct.b, 3);
-```
-
-One can reorder arguments; they just have to match with the struct's fields. One can also optionally provide generic parameters inside angle brackets `<...>`.
-```rust
-#[partial(Mystruct)]
-fn foo<T>(b: &B, some_arg: T, a: &mut A, c: &C) {
-    // ...
-}
-
-foo!(<&str>, mystruct, "hello");
-// expands to:
-// foo::<&str>(&mystruct.b, "hello", &mut mystruct.a, &mystruct.c);
-```
-
-Lifetime parameters are also supported.
-```rust
-#[partial(Mystruct)]
-fn foo<'t: 'static>(b: &'t B, a: &'t A, other_arg: &'t u8) {
-    // ...
-}
-
-const mystruct: Mystruct = Mystruct { ... };
-
-foo!(<'static>, mystruct, &3);
-// expands to:
-// foo::<'static>(&mystruct.b, &mystruct.a, &3);
-```
-
-### Propagating from scope
-
-Two functions marked with identical `clasma::partial` attributes, can call one another using `<function name>_scope!` macros. One calls `foo_scope!` identically to `foo!`, except that one omits the `mystruct`. The arguments to `foo` previously supplied by `mystruct`, now come directly from the local scope at the call site.
-
-```rust
-#[partial(Mystruct)]
-fn foo<T>(a: &A, other_arg: T, c: &mut C) {
-    // ...
-}
-
-#[partial(Mystruct)]
-fn bar(c: &mut C, some_arg: u8, b: &B, a: &mut A) {
-    
-    foo_scope!(<u8>, some_arg); // supplies the fields of `Mystruct` from local scope
-    // expands to:
-    // foo::<u8>(a, some_arg, c)
-}
-```
-
-### `impl`-blocks
-
-For `impl` blocks, the `#[partial(..)]` attribute goes on top of the `impl`. This will generate macros for all functions in the block.
-
-``` rust
-#[partial(Mystruct)]
-impl Mystruct {
-    // ...
-    fn foo(a: &mut A, b: &B, some_arg: u8) {
-        // ...
-    }
-
-    fn bar(c: &mut C, some_arg: u8, b: &B, a: &mut A) {
-
-        foo_scope!(some_arg);
-        // expands to:
-        // Mystruct::foo(a, b, some_arg)
-    }
-}
-
-foo!(mystruct, 3);
-// expands to:
-// Mystruct::foo(&mut mystruct.a, &mystruct.b, 3);
-```
-
-If *both* the type and the function in the `impl` block are generic, one can provide the arguments separated by `::` like so:
-``` rust
-#[partial(Mystruct)]
-impl<T> Mystruct<T> {
-    // ...
-    fn foo<U>(a: &mut A, b: &B, some_arg: U, other_arg: T) {
-        // ...
-    }
-}
-
-foo!(<&str>::<u8>, mystruct, 3, "hello");
-// expands to:
-// Mystruct::<&str>::foo::<u8>(&mut mystruct.a, &mystruct.b, 3, "hello");
-```
-
-If *only* the type is generic, one passes the arguments like this: `foo!(<T>::, mystruct, ...)`
 
 ## Motivating Example
 
@@ -179,7 +61,7 @@ impl Tourist {
 }
 ```
 
-However, this gets tedious as the number of fields increases.
+However, one can imagine how tedious it gets, as the number of fields increases.
 
 ### With `clasma::partial`
 
@@ -189,21 +71,292 @@ The `partial` macro handles borrowing and argument passing.
 #[clasma]
 struct Tourist {...}
 
-#[partial(Tourist)]
+#[clasma]
 impl Tourist {
+    #[clasma(&<destinations, mut n_visits> Tourist)]
+    fn visit(dest: &String) {
+        if destinations.contains(dest) {
+            *n_visits += 1;
+        }
+    }
     // ...
     fn visit_all(&mut self) {
         for dest in &self.destinations {
-            visit!(self, dest); // Now the call to `visit` becomes much more concise
+            visit!(self, dest); // Now calls to `visit` become more concise
         }
         println!("Visited {} countries", self.destinations.len());
     }
 }
 ```
 
-
 ## Installation
 
 ```sh
 cargo add clasma
 ```
+
+## Usage
+
+Consider the following struct:
+```rust
+#[clasma]
+struct Mystruct {
+    a: A,
+    b: B,
+    c: C,
+}
+
+let mut mystruct = Mystruct {
+    a: A::new(),
+    b: B::new(),
+    c: C::new(),
+};
+```
+
+The `#[clasma(&<..> Mystruct)]` attribute proc-macro expands `foo`'s signature with the fields specified between `&<..>`. For example,
+
+```rust
+#[partial(&<mut a, b> Mystruct)]
+fn foo(some_arg: u8) {
+    // ...
+}
+```
+
+expands to
+```rust
+fn foo(some_arg: u8, a: &mut A, b: &B) {
+    // ...
+}
+```
+
+Additionally, `#[clasma(&<..> Mystruct)]` generates a macro `foo!`. The first argument to the `foo!` is an instance of `Mystruct`. `foo!(mystruct, ..)` borrows each of `mystruct`'s fields individually, passing them into `foo`'s corresponding arguments. One passes the remaining arguments in the same order as the original signature (prior to expansion).
+
+```rust
+foo!(3, mystruct);
+```
+expands to
+```rust
+foo(3, &mut mystruct.a, &mystruct.b);
+```
+
+One can also optionally provide generic type parameters inside angle brackets `<...>`:
+```rust
+#[clasma(&<a, b> Mystruct)]
+fn foo<T>(some_arg: T) {
+    // ...
+}
+
+foo!(<&str>, "hello", mystruct);
+```
+expands to
+```rust
+fn foo<T>(some_arg: T, a: &A, b: &B) {
+    // ...
+}
+
+foo::<&str>("hello", &mystruct.a, &mystruct.b);
+```
+
+`#[clasma(&<..> Mystruct)]` supports adding lifetime annotations to partially borrowed fields in `&<..>`, and one can likewise call `foo!` with lifetime parameters:
+
+```rust
+const mystruct: Mystruct = Mystruct { ... };
+
+#[clasma(&<'t a, 't b> Mystruct)]
+fn foo<'t: 'static, T>(other_arg: &'t u8) {
+    // ...
+}
+
+foo!(<'static>, &3, mystruct);
+```
+expands to
+```rust
+const mystruct: Mystruct = Mystruct { ... };
+
+fn foo<'t: 'static, T>(other_arg: &'t u8, a: &'t A, b: &'t B) {
+    // ...
+}
+
+foo::<'static>(&3, &mystruct.a, &mystruct.b);
+```
+
+In addition to enumerating field names in `&<..>` manually, one can also use a wildcard `*` to specify all fields, and `!` to exclude a field.
+
+For example, `&<'t mut a, 's *, mut b, !c> Mystruct` is equivalent to `&<'s a, 's b> Mystruct`.
+
+### Generic structs
+
+``` rust
+#[clasma]
+struct Mystruct<T,U> {
+    a: Vec<T>,
+    b: Vec<(T,U)>,
+    c: U,
+}
+
+#[clasma(&<*> Mystruct<T, bool>)]
+fn foo<U>(some_arg: U) {
+    // ...
+}
+
+let mystruct = Mystruct {
+    a: vec!["hi"],
+    b: vec![("bye", false)],
+    c: true,
+}
+
+foo!(<&str>, "hello", mystruct);
+```
+expands to
+``` rust
+struct Mystruct<T,U> { ... }
+
+fn foo<U>(some_arg: T, a: &Vec<U>, b: &Vec<(U,bool)>, c: &bool) {
+    // ...
+}
+
+let mystruct = Mystruct {
+    a: vec!["hi"],
+    b: vec![("bye", false)],
+    c: true,
+}
+
+foo::<&str>("hello", &mystruct.a, &mystruct.b, &mystruct.c);
+```
+
+### Propagating from scope
+
+In addition to partially borrowing fields from a struct instance, `foo!` also accepts `..` in place of the struct instance. The arguments to `foo` previously supplied by `mystruct`, are now read directly from the local scope at the call site.
+
+```rust
+#[clasma(&<a, mut c> Mystruct)]
+fn foo<T>(some_arg: T) {
+    // ...
+}
+
+#[clasma(&<*> Mystruct)]
+fn bar() {
+    let c = &mut C::new();
+    foo!(<u8>, 3, ..); // supplies the fields of `Mystruct` from local scope
+}
+```
+expands to
+```rust
+fn foo<T>(some_arg: T, a: &A, c: &mut C) {
+    // ...
+}
+
+fn bar(a: &A, b: &B, c: &C) {
+    let c = &mut C::new();
+    foo::<u8>(3, a, c);
+}
+```
+
+### Partially borrowing several structs
+
+Presuming that two structs have non-overlapping fields, one can partially borrow both structs with `#[clasma(&<..> Struct1, &<..> Struct2)]`:
+
+```rust
+#[clasma]
+struct Other {
+    o1: A,
+    o2: B,
+    o3: C,
+}
+
+#[clasma(&<a, mut c> Mystruct, &<mut o2, o3> Other)]
+fn foo<T>(some_arg: T) {
+    // ...
+}
+
+let a = &A();
+let c = &mut C();
+let mut other = Other {
+    o1: A::new(),
+    o2: B::new(),
+    o3: C::new(),
+};
+
+foo!(<u8>, 3, .., other); // supplies the fields of `Mystruct` locally and fields of `Other` from `other`
+```
+expands to
+``` rust
+#[clasma]
+struct Other { ... }
+
+fn foo<T>(some_arg: T, a: &A, c: &mut C, o2: &mut B, o3: &C) {
+    // ...
+}
+
+let a = &A();
+let c = &mut C();
+let mut other = Other {
+    o1: A::new(),
+    o2: B::new(),
+    o3: C::new(),
+};
+
+foo::<u8>(3, a, c, &mut other.o2, &other.o3);
+```
+
+### `impl`-blocks
+
+For `impl`-blocks, a `#[clasma]` attribute must go on top of the `impl`. One can then annotate inner functions with `#[clasma(&<..> Mystruct)]` like usual:
+``` rust
+#[clasma]
+impl Mystruct {
+    // ...
+    #[clasma(&<mut a, b) Mystruct]
+    fn foo(some_arg: u8) {
+        // ...
+    }
+
+    #[clasma(&<mut *, b)]
+    fn bar(other_arg: u8) {
+
+        foo!(other_arg, ..);
+    }
+}
+
+foo!(3, mystruct);
+```
+expands to
+``` rust
+impl Mystruct {
+    // ...
+    fn foo(some_arg: u8, a: &mut A, b: &B) {
+        // ...
+    }
+
+    #[clasma(&<mut *, b)]
+    fn bar(other_arg: u8, a: &mut A, b: &B, c: &mut C) {
+
+        Mystruct::foo(other_arg, a, b)
+    }
+}
+
+Mystruct::foo(3, &mut mystruct.a, &mystruct.b);
+```
+
+If *both* the type and the function in the `impl` block are generic, one can provide the arguments separated by `::` like so:
+``` rust
+#[clasma]
+impl<T> Mystruct<T> {
+    // ...
+    #[clasma(&<mut a, b> Mystruct<T>)]
+    fn foo<U>(a: &mut A, b: &B, some_arg: U, other_arg: T) {
+        // ...
+    }
+}
+
+foo!(<&str>::<u8>, 3, "hello", mystruct);
+// expands to:
+// Mystruct::<&str>::foo::<u8>(3, "hello", &mut mystruct.a, &mystruct.b);
+```
+
+If *only* the type is generic, one can omit the second pair of angle brackets and pass the arguments like this:
+
+``` rust
+foo!(<T>::, ...)
+```
+
