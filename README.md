@@ -6,9 +6,41 @@
 A procedural attribute macro to reduce boilerplate when writing functions that partially borrow a struct.
 
 ## Overview
-Annotating a struct `Mystruct` with `#[clasma]`, allows the attribute proc-macro `#[clasma(&<..> Mystruct)]` on a function `foo`, to generate a macro `foo!`, that is callable similarly to `foo`, except that one can pass an instance of `Mystruct` to provide the arguments in `foo` that correspond to `Mystruct`'s fields.
 
-This crate attempts to make partial or "split" borrows more ergonomic in Rust, where functions sometimes must borrow individual fields, rather than a single mutable reference to a struct, in order to adhere to borrowing rules, leading to verbose call sites.
+This crate attempts to make partial or "split" borrows more ergonomic in Rust – a problem where functions sometimes must borrow individual fields, rather than a single mutable reference to a struct, in order to adhere to borrowing rules, leading to verbose call sites.
+
+With a struct definition like
+```rust
+#[clasma]
+struct Mystruct { ... }
+```
+adding `#[clasma(&<...> Mystruct)]` to a function definition `fn foo(..) {}`
+1. extends `foo`'s arguments with borrows of some of `Mystruct`'s fields specified in `&<...>` and
+2. generates a macro `foo!` – essentially callable just like `foo`'s original signature but taking an additional an instance `mystruct` of `Mystruct` to partially borrow
+```rust
+#[clasma(&<...> Mystruct)]
+fn foo( ... ) { ... }
+
+foo!( ... , mystruct);
+```
+expands to
+```rust
+fn foo( ..., <field>: &<field_type>, <field>: &<field_type>... ) { ... }
+
+foo( ... , &mystruct.<field>, &mystruct.<field>);
+```
+where, again, the fields are specified between `&<...>`.
+
+## Installation
+
+> [!IMPORTANT]
+> `clasma` requires `#[feature(decl_macro)]`
+> 
+> This is in order to ensure, that `path::to::foo!` expands to `path::to::foo` as opposed to just `foo`. `macro_rules!` macros are unhygienic in this regard.
+
+```sh
+cargo add clasma
+```
 
 ## Motivating Example
 
@@ -61,15 +93,15 @@ impl Tourist {
 }
 ```
 
-However, one can imagine how tedious it gets, as the number of fields increases.
+However, one can imagine how tedious it would get, as the number of fields increases.
 
-### With `clasma::partial`
+### With `clasma`
 
-The `partial` macro handles borrowing and argument passing.
+The `clasma` macro handles borrowing and argument passing.
 
 ```rust
 #[clasma]
-struct Tourist {...}
+struct Tourist { ... }
 
 #[clasma]
 impl Tourist {
@@ -87,12 +119,6 @@ impl Tourist {
         println!("Visited {} countries", self.destinations.len());
     }
 }
-```
-
-## Installation
-
-```sh
-cargo add clasma
 ```
 
 ## Usage
@@ -113,15 +139,14 @@ let mut mystruct = Mystruct {
 };
 ```
 
-The `#[clasma(&<..> Mystruct)]` attribute proc-macro expands `foo`'s signature with the fields specified between `&<..>`. For example,
+The `#[clasma(&<...> Mystruct)]` attribute proc-macro expands `foo`'s signature with the fields specified between `&<...>`. For example,
 
 ```rust
-#[partial(&<mut a, b> Mystruct)]
+#[clasma(&<mut a, b> Mystruct)]
 fn foo(some_arg: u8) {
     // ...
 }
 ```
-
 expands to
 ```rust
 fn foo(some_arg: u8, a: &mut A, b: &B) {
@@ -129,8 +154,7 @@ fn foo(some_arg: u8, a: &mut A, b: &B) {
 }
 ```
 
-Additionally, `#[clasma(&<..> Mystruct)]` generates a macro `foo!`. The first argument to the `foo!` is an instance of `Mystruct`. `foo!(mystruct, ..)` borrows each of `mystruct`'s fields individually, passing them into `foo`'s corresponding arguments. One passes the remaining arguments in the same order as the original signature (prior to expansion).
-
+Additionally, `#[clasma(&<...> Mystruct)]` generates a macro `foo!`. The first arguments to `foo!` are the arguments of `foo`'s original signature (`some_arg: u8`) and the final argument is an instance of `Mystruct`. `foo!(..., mystruct)` borrows each of `mystruct`'s fields individually, passing them into `foo`'s corresponding arguments.
 ```rust
 foo!(3, mystruct);
 ```
@@ -157,7 +181,7 @@ fn foo<T>(some_arg: T, a: &A, b: &B) {
 foo::<&str>("hello", &mystruct.a, &mystruct.b);
 ```
 
-`#[clasma(&<..> Mystruct)]` supports adding lifetime annotations to partially borrowed fields in `&<..>`, and one can likewise call `foo!` with lifetime parameters:
+`#[clasma(&<...> Mystruct)]` supports adding lifetime annotations to partially borrowed fields in `&<...>`, and one can likewise call `foo!` with lifetime parameters:
 
 ```rust
 const mystruct: Mystruct = Mystruct { ... };
@@ -180,7 +204,7 @@ fn foo<'t: 'static, T>(other_arg: &'t u8, a: &'t A, b: &'t B) {
 foo::<'static>(&3, &mystruct.a, &mystruct.b);
 ```
 
-In addition to enumerating field names in `&<..>` manually, one can also use a wildcard `*` to specify all fields, and `!` to exclude a field.
+In addition to enumerating field names in `&<...>` manually, one can also use a wildcard `*` to specify all fields, and `!` to exclude a field.
 
 For example, `&<'t mut a, 's *, mut b, !c> Mystruct` is equivalent to `&<'s a, 's b> Mystruct`.
 
@@ -254,7 +278,7 @@ fn bar(a: &A, b: &B, c: &C) {
 
 ### Partially borrowing several structs
 
-Presuming that two structs have non-overlapping fields, one can partially borrow both structs with `#[clasma(&<..> Struct1, &<..> Struct2)]`:
+Presuming that two structs have non-overlapping fields, one can partially borrow both structs with `#[clasma(&<...> Struct1, &<...> Struct2)]`:
 
 ```rust
 #[clasma]
@@ -281,7 +305,6 @@ foo!(<u8>, 3, .., other); // supplies the fields of `Mystruct` locally and field
 ```
 expands to
 ``` rust
-#[clasma]
 struct Other { ... }
 
 fn foo<T>(some_arg: T, a: &A, c: &mut C, o2: &mut B, o3: &C) {
@@ -299,9 +322,9 @@ let mut other = Other {
 foo::<u8>(3, a, c, &mut other.o2, &other.o3);
 ```
 
-### `impl`-blocks
+### `impl` blocks
 
-For `impl`-blocks, a `#[clasma]` attribute must go on top of the `impl`. One can then annotate inner functions with `#[clasma(&<..> Mystruct)]` like usual:
+For `impl` blocks, a `#[clasma]` attribute must go on top of the `impl`. One can then annotate inner functions with `#[clasma(&<...> Mystruct)]` like usual:
 ``` rust
 #[clasma]
 impl Mystruct {

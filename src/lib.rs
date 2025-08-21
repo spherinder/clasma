@@ -260,21 +260,21 @@ pub fn clasma_fn(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         Some(if mu { quote! { #id #i mut } } else { quote! { #id #i } })
     }).collect();
     let func_name = &item_fn.sig.ident;
+    let vis = &item_fn.vis;
 
     let res = quote! {
         #item_fn
 
-        #[macro_export]
-        macro_rules! #func_name {
-            ( < $($lt:lifetime),+ $(, $t:ty)* >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                ::clasma::__scoped!( {#func_name::< $($lt),* $(, $t)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-            };
-            ( < $($t:ty),+ >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                ::clasma::__scoped!( {#func_name::< $($t),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-            };
-            ( #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                ::clasma::__scoped!( {#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-            };
+        #vis macro #func_name {
+            ( < $($lt:lifetime),+ $(, $t:ty)* > , #($#non_borrowed: expr ,)* $($st:tt),* ) => {
+                ::clasma::__scoped!({ self::#func_name::< $($lt),* $(,$t)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+            },
+            ( < $($t:ty),+ > , #($#non_borrowed: expr ,)* $($st:tt),* ) => {
+                ::clasma::__scoped!({ self::#func_name::< $($t),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+            },
+            ( #($#non_borrowed: expr ,)* $($st:tt),* ) => {
+                ::clasma::__scoped!({ self::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+            },
         }
     };
     return res.into();
@@ -315,10 +315,10 @@ pub fn clasma_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let macs: Vec<_> = item_impl.items.iter_mut().filter_map(|item| {
         let ImplItem::Fn(item_fn) = item else { return None };
-        let i = item_fn.attrs.iter_mut().enumerate().find_map(|(i,Attribute {meta, ..})| {
-            let Meta::List(MetaList {path,..}) = meta else { return None };
-            if path.segments.last().unwrap().ident != "clasma" { return None };
-            Some(i)
+        let i = item_fn.attrs.iter_mut().position(|Attribute {meta, ..}| {
+            let Meta::List(MetaList {path,..}) = meta else { return false };
+            if path.segments.last().unwrap().ident != "clasma" { return false };
+            true
         })?;
         let Meta::List(MetaList {tokens,..}) = item_fn.attrs.remove(i).meta else { unreachable!() };
         let mut borrows = match Punctuated::<BorrowAttr,token::Comma>::parse_terminated.parse2(tokens) {
@@ -379,40 +379,35 @@ pub fn clasma_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         }).collect();
 
         let func_name = &item_fn.sig.ident;
+        let vis = &item_fn.vis;
+        let mac = format_ident!("__{func_name}_1");
 
         let res = quote! {
-            #[macro_export]
-            macro_rules! #func_name {
-                ( < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($lt2:lifetime),+ $(, $t2:ty)* >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::< $($lt1),* $(, $t1)* >::#func_name::< $($lt2),* $(, $t2)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
-                ( < $($lt1:lifetime),+ $(, $t1:ty)* >::< $($t2:ty),+ >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::< $($lt1),* $(, $t1)* >::#func_name::< $($t2),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
-                ( < $($t1:ty),+ >::< $($lt2:lifetime),+ $(, $t2:ty)* >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::< $($lt1),* >::#func_name::< $($lt2),* $(, $t2)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
-                ( < $($t1:ty),+ >::< $($t2:ty),+ >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::< $($t1),* >::#func_name::< $($t2),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
-
-                ( < $($lt:lifetime),+ $(, $t:ty)* >::, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::< $($lt),* $(, $t)* >::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
-                ( < $($t:ty),+ >::, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::< $($t),* >::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
-
-                ( < $($lt:lifetime),+ $(, $t:ty)* >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::#func_name::< $($lt),* $(, $t)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
-                ( < $($t:ty)+ >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::#func_name::< $($t),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
-
-                ( #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!( {#st_path::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
-                };
+            #vis macro #func_name {
+                ( < $($lt:lifetime),+ $(, $t:ty)* >:: $($rest:tt)* ) => {
+                    #mac!( [$($lt),* $(,$t)*] $($rest)* )
+                },
+                ( < $($t:ty),+ >:: $($rest:tt)* ) => {
+                    #mac!( [$($t),*] $($rest)* )
+                },
+                ( #($#non_borrowed: expr ,)* $($st:tt),* ) => {
+                    ::clasma::__scoped!({ self::#st_path::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                },
+                ( $($rest:tt)* ) => {
+                    #mac!( [] $($rest)* )
+                },
+            }
+            #[doc(hidden)]
+            #vis macro #mac {
+                ( [$($stgen:tt)*] < $($lt:lifetime),+ $(, $t:ty)* >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
+                    ::clasma::__scoped!({ self::#st_path::< $($stgen)* >::#func_name::< $($lt,)* $(,$t)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                },
+                ( [$($stgen:tt)*] < $($t:ty),* >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
+                    ::clasma::__scoped!({ self::#st_path::< $($stgen)* >::#func_name::< $($t),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                },
+                ( [$($stgen:tt)*] , #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
+                    ::clasma::__scoped!({ self::#st_path::< $($stgen)* >::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                },
             }
         };
         Some(res)
@@ -432,16 +427,17 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
     match item {
         Item::Struct(item_struct) => {
             let st_ident = &item_struct.ident;
+            let vis = &item_struct.vis;
             let res = quote! {
                 #item_struct
 
-                macro_rules! #st_ident {
+                #vis macro #st_ident {
                     ( $cb:path { $($defs:tt)* } [] $($extra:tt)* ) => {
                         $cb!( { $($defs)* #item_struct ; } $($extra)* );
-                    };
+                    },
                     ( $cb:path { $($defs:tt)* } [ $p:path $(, $ps:path)* ] $($extra:tt)* ) => {
                         $p!( $cb { $($defs)* #item_struct ; } [ $($ps),* ] $($extra)* );
-                    };
+                    },
                 }
             };
             return res.into();
