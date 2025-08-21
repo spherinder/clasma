@@ -7,7 +7,7 @@ A procedural attribute macro to reduce boilerplate when writing functions that p
 
 ## Overview
 
-This crate attempts to make partial or "split" borrows more ergonomic in Rust – a problem where functions sometimes must borrow individual fields, rather than a single mutable reference to a struct, in order to adhere to borrowing rules, leading to verbose call sites.
+This crate attempts to make partial or "split" borrows[^1][^2][^3][^4][^5][^6] more ergonomic in Rust – a problem where functions sometimes must borrow individual fields, rather than a single mutable reference to a struct, in order to adhere to borrowing rules, leading to verbose call sites.
 
 With a struct definition like
 ```rust
@@ -30,6 +30,13 @@ fn foo( ..., <field>: &<field_type>, <field>: &<field_type>... ) { ... }
 foo( ... , &mystruct.<field>, &mystruct.<field>);
 ```
 where, again, the fields are specified between `&<...>`.
+
+[^1]: [Rust Internals "Notes on partial borrow"](https://internals.rust-lang.org/t/notes-on-partial-borrows/20020).
+[^2]: [The Rustonomicon "Splitting Borrows"](https://doc.rust-lang.org/nomicon/borrow-splitting.html).
+[^3]: [Niko Matsakis Blog Post "After NLL: Interprocedural conflicts"](https://smallcultfollowing.com/babysteps/blog/2018/11/01/after-nll-interprocedural-conflicts/).
+[^4]: [Afternoon Rusting "Multiple Mutable References"](https://oribenshir.github.io/afternoon_rusting/blog/mutable-reference).
+[^5]: [Partial borrows Rust RFC](https://github.com/rust-lang/rfcs/issues/1215#issuecomment-333316998).
+[^6]: [HackMD "My thoughts on (and need for) partial borrows"](https://hackmd.io/J5aGp1ptT46lqLmPVVOxzg?view).
 
 ## Installation
 

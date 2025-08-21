@@ -1,32 +1,52 @@
-use clasma::partial;
+#![allow(unused)]
+#![feature(decl_macro)]
+#![no_implicit_prelude]
+use ::clasma::clasma;
 
-struct A();
-struct B();
-struct C(u8);
+pub struct A();
+pub struct B();
+pub struct C(u8);
 
-struct Mystruct {
-    name1: A,
-    name2: B,
-    name3: C,
+#[clasma]
+pub struct Par {
+    pub name1: A,
+    pub name2: B,
+    pub name3: C,
 }
 
-#[partial]
-fn foo<T>(#[clasma] name2: &B, #[clasma] name1: &mut A, other_arg: T) {}
+#[clasma(&<name1> Par)]
+fn parfn() {}
 
-#[partial]
-fn bar(some_arg: u8, #[clasma] name2: &mut B, #[clasma] name3: &C) {}
+mod sub {
+    fn test_from_sub() {
+        let ms = super::Par {
+            name1: super::A(),
+            name2: super::B(),
+            name3: super::C(3),
+        };
+        super::parfn!(ms);
+    }
 
-#[test]
-fn t() {
-    let mut x = Mystruct {
+    #[super::clasma]
+    pub struct Sub {
+        pub name1: super::A,
+        pub name2: super::B,
+        pub name3: super::C,
+    }
+
+    #[super::clasma(&<name1> Sub)]
+    pub fn subfn() {}
+
+    #[super::clasma(&<*> super::Par)]
+    pub fn subfn2() {}
+
+}
+
+fn test_from_par() {
+    let ms = sub::Sub {
         name1: A(),
         name2: B(),
         name3: C(3),
     };
-    bar!(x, 3);
-    // expands to:
-    // bar(3, &mut x.name2, &x.name3);
-    foo!(<&str>, x, "hello");
-    // expands to:
-    // foo::<&str>(&x.name2, &mut x.name1, "hello");
+    sub::subfn!(ms);
 }

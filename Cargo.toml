@@ -7,7 +7,7 @@ license = "GPL-3.0-or-later"
 description = "A procedural macro for partial borrowing"
 repository = "https://github.com/spherinder/clasma"
 documentation = "https://docs.rs/clasma"
-keywords = ["proc-macro", "borrow", "references", "partial-borrow", "partial-borrowing", "view-types", "view-struct", "clasma"]
+keywords = ["proc-macro", "borrow", "references", "partial-borrow", "view-types"]
 
 [lib]
 proc-macro = true
