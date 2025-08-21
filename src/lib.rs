@@ -267,13 +267,13 @@ pub fn __clasma_fn(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
         #vis macro #func_name {
             ( < $($lt:lifetime),+ $(, $t:ty)* > , #($#non_borrowed: expr ,)* $($st:tt),* ) => {
-                ::clasma::__scoped!({ self::#func_name::< $($lt),* $(,$t)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                ::clasma::__scoped!({ #func_name::< $($lt),* $(,$t)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
             },
             ( < $($t:ty),+ > , #($#non_borrowed: expr ,)* $($st:tt),* ) => {
-                ::clasma::__scoped!({ self::#func_name::< $($t),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                ::clasma::__scoped!({ #func_name::< $($t),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
             },
             ( #($#non_borrowed: expr ,)* $($st:tt),* ) => {
-                ::clasma::__scoped!({ self::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                ::clasma::__scoped!({ #func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
             },
         }
     };
@@ -391,7 +391,7 @@ pub fn __clasma_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStream 
                     #mac!( [$($t),*] $($rest)* )
                 },
                 ( #($#non_borrowed: expr ,)* $($st:tt),* ) => {
-                    ::clasma::__scoped!({ self::#st_path::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                    ::clasma::__scoped!({ #st_path::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
                 },
                 ( $($rest:tt)* ) => {
                     #mac!( [] $($rest)* )
@@ -400,13 +400,13 @@ pub fn __clasma_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStream 
             #[doc(hidden)]
             #vis macro #mac {
                 ( [$($stgen:tt)*] < $($lt:lifetime),+ $(, $t:ty)* >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!({ self::#st_path::< $($stgen)* >::#func_name::< $($lt,)* $(,$t)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                    ::clasma::__scoped!({ #st_path::< $($stgen)* >::#func_name::< $($lt,)* $(,$t)* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
                 },
                 ( [$($stgen:tt)*] < $($t:ty),* >, #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!({ self::#st_path::< $($stgen)* >::#func_name::< $($t),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                    ::clasma::__scoped!({ #st_path::< $($stgen)* >::#func_name::< $($t),* >( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
                 },
                 ( [$($stgen:tt)*] , #($#non_borrowed: expr ,)* $($st:tt),+ ) => {
-                    ::clasma::__scoped!({ self::#st_path::< $($stgen)* >::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
+                    ::clasma::__scoped!({ #st_path::< $($stgen)* >::#func_name( #($#non_borrowed),* )} [$( {$st} )*] [#field_borrow_ix] )
                 },
             }
         };
@@ -513,7 +513,7 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
 #[test]
 fn test_simple_field_access() {
     let input: TokenStream = quote! {
-        <field1, field2>: some::path::to::Type
+        &<field1, field2> some::path::to::Type
     };
 
     let parsed: BorrowAttr = syn::parse2(input).expect("Failed to parse");

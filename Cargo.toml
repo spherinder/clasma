@@ -1,6 +1,6 @@
 [package]
 name = "clasma"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 authors = ["Oliver Bergqvist <spherinder@gmail.com>"]
 license = "GPL-3.0-or-later"

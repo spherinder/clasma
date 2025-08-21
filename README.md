@@ -336,12 +336,12 @@ For `impl` blocks, a `#[clasma]` attribute must go on top of the `impl`. One can
 #[clasma]
 impl Mystruct {
     // ...
-    #[clasma(&<mut a, b) Mystruct]
+    #[clasma(&<mut a, b> Mystruct)]
     fn foo(some_arg: u8) {
         // ...
     }
 
-    #[clasma(&<mut *, b)]
+    #[clasma(&<mut *> Mystruct)]
     fn bar(other_arg: u8) {
 
         foo!(other_arg, ..);
@@ -358,8 +358,7 @@ impl Mystruct {
         // ...
     }
 
-    #[clasma(&<mut *, b)]
-    fn bar(other_arg: u8, a: &mut A, b: &B, c: &mut C) {
+    fn bar(other_arg: u8, a: &mut A, b: &mut B, c: &mut C) {
 
         Mystruct::foo(other_arg, a, b)
     }
@@ -374,7 +373,7 @@ If *both* the type and the function in the `impl` block are generic, one can pro
 impl<T> Mystruct<T> {
     // ...
     #[clasma(&<mut a, b> Mystruct<T>)]
-    fn foo<U>(a: &mut A, b: &B, some_arg: U, other_arg: T) {
+    fn foo<U>(some_arg: U, other_arg: T) {
         // ...
     }
 }
