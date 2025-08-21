@@ -200,7 +200,7 @@ pub fn __scoped(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 type Ctx<'t,T,U> = BTreeMap<T, (usize, U, Option<(bool, Option<&'t Lifetime>)>)>;
 
 #[proc_macro]
-pub fn clasma_fn(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn __clasma_fn(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let (mut stdefs, borrows, mut item_fn) = match (|input: ParseStream| {
         let stdefs = {
             let content; braced!(content in input);
@@ -281,7 +281,7 @@ pub fn clasma_fn(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 #[proc_macro]
-pub fn clasma_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn __clasma_impl(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let (stdefs, imports, mut item_impl) = match (|input: ParseStream| {
         let stdefs = {
             let content; braced!(content in input);
@@ -458,7 +458,7 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
                 ).to_compile_error().into()
             };
             let res = quote! {
-                #fst_import!( ::clasma::clasma_fn {} [ #(#imports),* ] [#borrows] #item_fn);
+                #fst_import!( ::clasma::__clasma_fn {} [ #(#imports),* ] [#borrows] #item_fn);
             };
             return res.into();
         },
@@ -496,7 +496,7 @@ pub fn clasma(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
             };
 
             let res = quote! {
-                #fst_import!( ::clasma::clasma_impl {} [ #(#imports_rest),* ] [ #(#imports),* ] #item_impl);
+                #fst_import!( ::clasma::__clasma_impl {} [ #(#imports_rest),* ] [ #(#imports),* ] #item_impl);
             };
             return res.into();
         },
