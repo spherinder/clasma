@@ -1,13 +1,13 @@
 [package]
 name = "clasma"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 authors = ["Oliver Bergqvist <spherinder@gmail.com>"]
 license = "GPL-3.0-or-later"
 description = "A procedural macro for partial borrowing"
 repository = "https://github.com/spherinder/clasma"
 documentation = "https://docs.rs/clasma"
-keywords = ["proc-macro", "borrow", "references", "partial-borrow", "view-types"]
+keywords = ["partial-borrowing", "borrow", "reference", "partial-borrow", "view-types"]
 
 [lib]
 proc-macro = true
@@ -16,3 +16,6 @@ proc-macro = true
 proc-macro2 = "1.0.95"
 quote = "1.0.40"
 syn = { version = "2.0.104", features = ["full", "visit-mut", "extra-traits"] }
+
+[badges]
+maintenance = { status = "deprecated" }
